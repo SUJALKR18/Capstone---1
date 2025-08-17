@@ -11,6 +11,8 @@ device = "cpu"
 model = model.to(device)
 
 def detect_lang(text):
+    if not isinstance(text, str):
+        return "eng_Latn"
     if any("\u0980" <= ch <= "\u09FF" for ch in text):
         return "ben_Beng"
     elif any("\u0900" <= ch <= "\u097F" for ch in text):
@@ -32,34 +34,35 @@ def translate_nllb(text):
     )
     return tokenizer.decode(translated[0], skip_special_tokens=True)
 
-df = pd.read_csv("Hi-En-Ba/train.csv")
-batch_size = 500
-translated_texts = []
+df_original = pd.read_csv("Hi-En-Ba/train.csv")
+df_translated = pd.read_csv("translated.csv")
+translated_texts = [""] * len(df_original)
 
-total_rows = len(df)
+for i in range(len(df_translated)):
+    translated_texts[i] = df_translated["text"].iloc[i]
+
+batch_size = 500
+total_rows = len(df_original)
 start_time = time.time()
 
 for start in range(0, total_rows, batch_size):
     end = min(start + batch_size, total_rows)
-    batch = df.iloc[start:end, :].copy()
-    
-    print(f"\n--- Translating rows {start+1} to {end} ---")
-    
-    for i, text in enumerate(tqdm(batch["text"], desc="Translating", unit="row")):
-        translated_text = translate_nllb(text)
-        translated_texts.append(translated_text)
+    batch = df_original.iloc[start:end, :].copy()
+    for i, text in enumerate(tqdm(batch["text"], desc=f"Translating rows {start+1}-{end}", unit="row")):
+        idx = start + i
+        if isinstance(translated_texts[idx], str) and translated_texts[idx].strip():
+            continue
+        translated_texts[idx] = translate_nllb(text)
         elapsed = time.time() - start_time
-        avg_time_per_row = elapsed / len(translated_texts)
-        remaining_rows = total_rows - len(translated_texts)
+        avg_time_per_row = elapsed / (idx + 1)
+        remaining_rows = total_rows - (idx + 1)
         eta = remaining_rows * avg_time_per_row
-        if (i+1) % 50 == 0 or (start + i + 1) == total_rows:
-            print(f"Processed {len(translated_texts)}/{total_rows} rows. ETA: {int(eta//60)} min {int(eta%60)} sec")
-    
-    df_temp = df.iloc[:start+batch_size, :].copy()
-    df_temp["text"] = translated_texts
-    df_temp.to_csv("translated.csv", index=False)
-    print(f"✅ Saved progress up to row {start + batch_size}")
+        if (i+1) % 50 == 0 or (idx + 1) == total_rows:
+            print(f"Processed {idx + 1}/{total_rows} rows. ETA: {int(eta//60)} min {int(eta%60)} sec")
+    df_original["text"] = translated_texts
+    df_original.to_csv("translated.csv", index=False)
+    print(f"✅ Saved progress up to row {end}")
 
-df["text"] = translated_texts
-df.to_csv("translated.csv", index=False)
-print("\n✅ Translation complete. Saved as translated.csv")
+df_original["text"] = translated_texts
+df_original.to_csv("translated.csv", index=False)
+print("✅ Translation complete. Saved as translated.csv")
